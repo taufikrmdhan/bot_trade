@@ -1,97 +1,76 @@
 import { NextResponse } from 'next/server';
-import yahooFinance from 'yahoo-finance2';
 
-// Force dynamic agar Vercel tidak melakukan caching pada hasil API
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
-  // 1. Ambil query string 'key' dari URL
   const { searchParams } = new URL(req.url);
   const key = searchParams.get('key');
 
-  // 2. Validasi Security (Cek apakah key sesuai dengan .env)
   if (key !== process.env.ROBOT_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    // 3. Ambil Data Saham (Gunakan kode saham Indonesia .JK)
-    const symbols = ['BBCA.JK', 'TLKM.JK', 'ASII.JK', 'UNVR.JK'];
+    const API_KEY = process.env.TWELVE_DATA_API_KEY;
+    // Kita ambil BTC, ETH, dan SOL terhadap USD
+    const symbols = 'BTC/USD,ETH/USD,SOL/USD';
+    const url = `https://api.twelvedata.com/quote?symbol=${symbols}&apikey=${API_KEY}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    // Twelve Data mengembalikan objek jika banyak simbol
+    // Kita susun datanya untuk AI
+    let cryptoSummary = "";
     
-    // Kita gunakan 'as any[]' untuk menghindari error "Property does not exist on type never"
-    const results = await Promise.all(
-      symbols.map((sym) => yahooFinance.quote(sym))
-    ) as any[];
+    if (data["BTC/USD"]) {
+      cryptoSummary = Object.values(data).map((coin: any) => {
+        return `${coin.symbol}: $${parseFloat(coin.close).toLocaleString()} (${coin.percent_change}%)`;
+      }).join(', ');
+    } else {
+      // Jika hanya satu simbol atau format error
+      cryptoSummary = `Data: ${JSON.stringify(data)}`;
+    }
 
-    // Susun data saham menjadi teks untuk dikirim ke AI
-    const stockSummary = results
-      .map((s) => {
-        const price = s.regularMarketPrice;
-        const change = s.regularMarketChangePercent?.toFixed(2);
-        return `${s.symbol}: Rp${price} (${change}%)`;
-      })
-      .join(', ');
-
-    // 4. Kirim Data ke OpenRouter (AI)
+    // --- Panggil OpenRouter (AI) ---
     const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://your-site.com", // Opsional
-        "X-Title": "My Trading Bot", // Opsional
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // Menggunakan model FREE dari OpenRouter
         model: "anthropic/claude-haiku-4.5", 
         messages: [
           { 
             role: "system", 
-            content: "Anda adalah analis saham teknikal. Berikan analisis singkat apakah BUY, SELL, atau HOLD. Gunakan bahasa Indonesia yang santai tapi profesional. Berikan alasan maksimal 2 kalimat." 
+            content: "Anda adalah ahli trading crypto. Berikan analisis singkat (BUY/SELL/HOLD) dengan gaya bahasa yang to-the-point. Maksimal 2 kalimat per koin." 
           },
           { 
             role: "user", 
-            content: `Data Harga Saat Ini: ${stockSummary}. Apa rekomendasinya?` 
+            content: `Data Crypto Terbaru: ${cryptoSummary}. Berikan rekomendasi.` 
           }
         ]
       })
     });
 
     const aiData = await aiResponse.json();
-    
-    // Ambil teks hasil generate AI
-    const recommendation = aiData.choices?.[0]?.message?.content || "AI gagal memberikan rekomendasi.";
+    const recommendation = aiData.choices?.[0]?.message?.content || "Gagal mendapatkan rekomendasi AI.";
 
-    // 5. Kirim Hasil ke Telegram
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-    const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
-
-    const telegramRes = await fetch(telegramUrl, {
+    // --- Kirim ke Telegram ---
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: chatId,
-        text: `🤖 *UPDATE ROBOT TRADING*\n\n${recommendation}\n\n_Data: ${stockSummary}_`,
+        chat_id: process.env.TELEGRAM_CHAT_ID,
+        text: `🚀 *BOT CRYPTO REPORT*\n\n${recommendation}\n\n_Data: ${cryptoSummary}_`,
         parse_mode: "Markdown"
       })
     });
 
-    if (!telegramRes.ok) {
-      throw new Error("Gagal mengirim pesan ke Telegram");
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      message: "Rekomendasi berhasil dikirim ke Telegram",
-      data: stockSummary 
-    });
+    return NextResponse.json({ success: true, summary: cryptoSummary });
 
   } catch (error: any) {
-    console.error("Robot Error:", error.message);
-    return NextResponse.json({ 
-      success: false, 
-      error: error.message 
-    }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
