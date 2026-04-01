@@ -7,7 +7,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const key = searchParams.get('key');
 
-  // 1. Validasi Keamanan
+  // 1. Keamanan: Cek Secret Key
   if (key !== process.env.ROBOT_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -15,47 +15,41 @@ export async function GET(req: Request) {
   try {
     const API_KEY = process.env.TWELVE_DATA_API_KEY;
 
-    // 2. DISCOVERY: Ambil daftar koin crypto terbaru
+    // 2. Discovery: Ambil 30 Koin Crypto Teratas
     const listRes = await fetch(`https://api.twelvedata.com/cryptocurrencies`);
     const listData = await listRes.json();
-    
-    if (!listData.data) throw new Error("Gagal mengambil daftar koin dari Twelve Data");
+    if (!listData.data) throw new Error("Gagal mengambil data market.");
 
-    // Ambil 30 koin teratas (biasanya urutan market cap/volume)
     const top30Symbols = listData.data
       .slice(0, 30)
       .map((c: any) => `${c.symbol}/USD`)
       .join(',');
 
-    // 3. DATA TEKNIKAL: Ambil Quote + Indikator Oratnek (SMA, EMA, RSI, ATR)
-    const complexUrl = `https://api.twelvedata.com/complex_data?apikey=${API_KEY}`;
-    const complexBody = {
-      symbols: top30Symbols.split(','),
-      intervals: ["15min"],
-      outputsize: 50, // Dibutuhkan untuk SMA 50 dan Volume Profile sederhana
-      methods: [
-        "quote",
-        { name: "rsi", params: { period: 14 } },
-        { name: "ema", params: { time_period: 9 } },
-        { name: "ema", params: { time_period: 21 } },
-        { name: "sma", params: { time_period: 50 } },
-        { name: "atr", params: { time_period: 14 } }
-      ]
-    };
-
-    const techRes = await fetch(complexUrl, {
+    // 3. Teknikal: Ambil Data Kompleks (SMA, EMA, RSI, ATR)
+    const complexRes = await fetch(`https://api.twelvedata.com/complex_data?apikey=${API_KEY}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(complexBody)
+      body: JSON.stringify({
+        symbols: top30Symbols.split(','),
+        intervals: ["15min"],
+        outputsize: 50,
+        methods: [
+          "quote",
+          { name: "rsi", params: { period: 14 } },
+          { name: "ema", params: { time_period: 9 } },
+          { name: "ema", params: { time_period: 21 } },
+          { name: "sma", params: { time_period: 50 } },
+          { name: "atr", params: { time_period: 14 } }
+        ]
+      })
     });
-    const techData = await techRes.json();
+    const techData = await complexRes.json();
 
-    // 4. SENTIMEN: Ambil Fear & Greed Index
+    // 4. Sentimen: Fear & Greed Index
     const fgiRes = await fetch("https://api.alternative.me/fng/");
-    const fgiJson = await fgiRes.json();
-    const fgi = fgiJson.data[0];
+    const fgi = (await fgiRes.json()).data[0];
 
-    // 5. AI ANALYSIS: Gunakan Logika Oratnek V3.0 untuk memfilter Top 7
+    // 5. AI Momentum Filter (Llama 3.3 70B Free - Kencang & Gratis)
     const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -67,62 +61,56 @@ export async function GET(req: Request) {
         messages: [
           { 
             role: "system", 
-            content: `Anda adalah SCANNER CRYPTO ORATNEK V3.0. Analisa 30 koin dan pilih MAKSIMAL 7 koin terbaik (TOP 7).
+            content: `Anda adalah SCANNER MOMENTUM ORATNEK V3.0. 
+            Tugas: Analisa 30 koin dan HANYA berikan respon jika ada koin yang sedang dalam MOMENTUM BELI BAGUS.
             
-            LOGIKA TEKNIKAL (ORATNEK):
-            1. Trend Base: Harga WAJIB di atas SMA 50 (Bullish Only).
-            2. Momentum: EMA 9 Golden Cross EMA 21 (Sudah terjadi atau baru mulai).
-            3. Sniper Zone: Harga di area -0.5 ATR s/d +1 ATR dari EMA 21 (Sweet Spot).
-            4. RSI: Keluar dari zona extreme 30/70.
-            5. Volume: Relative Volume > 1.5x (Pocket Pivot indicator).
-            6. DCR%: Close harus di atas 70% range candle (Bullish conviction).
+            SYARAT MOMENTUM (Wajib):
+            1. Harga > SMA 50.
+            2. EMA 9 > EMA 21 (Baru cross atau sedang melebar).
+            3. Harga di SNIPER ZONE (-0.5 ATR s/d +1 ATR dari EMA 21).
             
-            FORMAT OUTPUT TELEGRAM:
-            🏆 **TOP 7 OPPORTUNITIES (ORATNEK V3.0)**
-            
-            1. [SYMBOL] - [Action: BUY/WAIT]
-            💰 Price: [Current Price] | RSI: [Val]
-            🎯 Target (TP): [RR 1:2]
-            🛑 Stop Loss (SL): [1.5x ATR dari Entry]
-            📝 Reason: [Jelaskan singkat kondisi EMA/SMA/ATR/Volume]
-            
-            (Ulangi sampai koin ke-7)
-            
-            📊 Market Sentiment: ${fgi.value} (${fgi.value_classification})`
+            INSTRUKSI PENTING:
+            - Jika ada yang memenuhi syarat, kirimkan daftar TOP 7 dengan format: Symbol, Price, SL, TP, dan Alasan Singkat.
+            - Jika TIDAK ADA koin yang memenuhi syarat teknikal di atas, Anda WAJIB menjawab hanya dengan satu kata: "NONE". 
+            - Jangan memberikan penjelasan apapun jika tidak ada momentum.`
           },
           { 
             role: "user", 
-            content: `Analisa 30 koin ini: ${JSON.stringify(techData.data)}` 
+            content: `Data Teknikal: ${JSON.stringify(techData.data)}. Market Sentiment: ${fgi.value}.` 
           }
         ]
       })
     });
 
     const aiData = await aiResponse.json();
-    const finalMessage = aiData.choices?.[0]?.message?.content || "Sinyal tidak ditemukan (Market Sideways).";
+    const recommendation = aiData.choices?.[0]?.message?.content || "NONE";
 
-    // 6. TELEGRAM: Kirim hasil ke bot kamu
-    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: process.env.TELEGRAM_CHAT_ID,
-        text: finalMessage,
-        parse_mode: "Markdown"
-      })
-    });
+    // 6. Logika Pengiriman Telegram: HANYA jika bukan "NONE"
+    // Kita hilangkan whitespace dan case agar pengecekan lebih akurat
+    const checkMomentum = recommendation.trim().toUpperCase();
+
+    if (checkMomentum !== "NONE" && checkMomentum !== "") {
+      await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: process.env.TELEGRAM_CHAT_ID,
+          text: `🚀 **MOMENTUM BELI TERDETEKSI (ORATNEK V3.0)**\n\n${recommendation}`,
+          parse_mode: "Markdown"
+        })
+      });
+      console.log("Momentum ditemukan, pesan dikirim!");
+    } else {
+      console.log("Pasar sideways/bearish, tidak ada pesan dikirim.");
+    }
 
     return NextResponse.json({ 
       success: true, 
-      scanned_count: 30, 
-      status: "Report sent to Telegram" 
+      scanned: 30, 
+      momentum: checkMomentum !== "NONE" 
     });
 
   } catch (error: any) {
-    console.error("Robot V3 Error:", error.message);
-    return NextResponse.json({ 
-      success: false, 
-      error: error.message 
-    }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
