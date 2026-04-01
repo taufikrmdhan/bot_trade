@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -40,7 +41,7 @@ export async function GET(req: Request) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "anthropic/claude-haiku-4.5", 
+        model: "anthropic/claude-3-haiku", 
         messages: [
           { 
             role: "system", 
@@ -54,8 +55,16 @@ export async function GET(req: Request) {
       })
     });
 
-    const aiData = await aiResponse.json();
-    const recommendation = aiData.choices?.[0]?.message?.content || "Gagal mendapatkan rekomendasi AI.";
+    let recommendation = "Gagal mendapatkan rekomendasi AI.";
+    if (aiResponse.ok) {
+      const aiData = await aiResponse.json();
+      recommendation = aiData.choices?.[0]?.message?.content || "Gagal mendapatkan rekomendasi AI.";
+    } else {
+      const errorData = await aiResponse.json().catch(() => ({}));
+      const errorMessage = `Error AI: ${aiResponse.status} - ${errorData.error?.message || 'Unknown error'}`;
+      console.error('AI API Error:', errorMessage, errorData);
+      recommendation = errorMessage;
+    }
 
     // --- Kirim ke Telegram ---
     await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -71,6 +80,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: true, summary: cryptoSummary });
 
   } catch (error: any) {
+    console.error('API Error:', error.message, error.stack);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
