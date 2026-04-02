@@ -12,10 +12,10 @@ export async function GET(req: Request) {
   try {
     const API_KEY = process.env.TWELVE_DATA_API_KEY;
 
-    // 1. Discovery 30 Koin Teratas
+    // 1. Discovery 50 Koin Teratas
     const listRes = await fetch(`https://api.twelvedata.com/cryptocurrencies`);
     const listData = await listRes.json();
-    const top30Symbols = listData.data.slice(0, 30).map((c: any) => `${c.symbol}/USD`).join(',');
+    const top30Symbols = listData.data.slice(0, 50).map((c: any) => `${c.symbol}/USD`).join(',');
 
     // 2. Ambil Data OHLC (Open, High, Low, Close) untuk kalkulasi Fibonacci & S/R
     const complexRes = await fetch(`https://api.twelvedata.com/complex_data?apikey=${API_KEY}`, {
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
           { 
             role: "system", 
             content: `Anda adalah Ahli Analisa Teknikal Fibonacci.
-            Tugas: Analisa 30 koin dan cari koin yang harganya sedang REtrace ke area Golden Ratio.
+            Tugas: Analisa 50 koin dan cari koin yang harganya sedang REtrace ke area Golden Ratio.
             
             LOGIKA STRATEGI:
             1. Cari Swing High dan Swing Low terkuat dalam 50 candle terakhir.
