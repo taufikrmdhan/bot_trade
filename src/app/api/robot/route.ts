@@ -92,6 +92,16 @@ export async function GET(req: Request) {
       });
       console.log("Sinyal ditemukan dan dikirim!");
     } else {
+      //jika tidak ada sinyal, munculkan pesan cuma analisa kondisi pasar dan pair yang discan (tidak console log tapi pesan di telegram)
+        await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: process.env.TELEGRAM_CHAT_ID,
+            text: `📊 **FOREX & CRYPTO SCANNER (FIBO)**\n\nTidak ada sinyal yang ditemukan.\n\nKondisi pasar saat ini:\n- Fear & Greed Index: ${fgi.value}\n- Pair yang di-scan: ${symbols.split(',').join(', ')}`,
+            parse_mode: "Markdown"
+          })
+        });
       console.log("Belum ada pair di area Fibonacci 0.618/0.786.");
     }
 
