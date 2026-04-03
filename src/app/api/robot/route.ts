@@ -5,32 +5,41 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  if (searchParams.get('key') !== process.env.ROBOT_SECRET) {
+  const key = searchParams.get('key');
+
+  // 1. Validasi Keamanan
+  if (key !== process.env.ROBOT_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
     const API_KEY = process.env.TWELVE_DATA_API_KEY;
 
-    // 1. Discovery 50 Koin Teratas
-    const listRes = await fetch(`https://api.twelvedata.com/cryptocurrencies`);
-    const listData = await listRes.json();
-    const top30Symbols = listData.data.slice(0, 50).map((c: any) => `${c.symbol}/USD`).join(',');
+    // 2. Daftar Simbol Spesifik (Forex & Major Crypto)
+    // Twelve Data menggunakan format "EUR/USD" untuk Forex dan "BTC/USD" untuk Crypto
+    const symbols = [
+      "EUR/USD", "USD/JPY", "GBP/USD", "AUD/USD", 
+      "XAU/USD", "NZD/USD", "USD/CHF", "BTC/USD", "ETH/USD"
+    ].join(',');
 
-    // 2. Ambil Data OHLC (Open, High, Low, Close) untuk kalkulasi Fibonacci & S/R
+    // 3. Teknikal: Ambil Data OHLC (Timeframe 1h untuk Fibonacci Mantap)
     const complexRes = await fetch(`https://api.twelvedata.com/complex_data?apikey=${API_KEY}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        symbols: top30Symbols.split(','),
-        intervals: ["30min"], // Timeframe lebih lebar agar S/R lebih kuat
-        outputsize: 50, // Mengambil 50 candle terakhir untuk mencari High/Low
+        symbols: symbols.split(','),
+        intervals: ["1h"],
+        outputsize: 50, // Mengambil 50 candle untuk mencari Swing High/Low yang valid
         methods: ["quote"]
       })
     });
     const techData = await complexRes.json();
 
-    // 3. AI Analysis: Fibonacci Retracement & S/R Logic
+    // 4. Sentimen: Fear & Greed Index
+    const fgiRes = await fetch("https://api.alternative.me/fng/");
+    const fgi = (await fgiRes.json()).data[0];
+
+    // 5. AI Analysis: Fokus Fibonacci Retracement 0.618 & 0.786
     const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -42,30 +51,25 @@ export async function GET(req: Request) {
         messages: [
           { 
             role: "system", 
-            content: `Anda adalah Ahli Analisa Teknikal Fibonacci.
-            Tugas: Analisa 50 koin dan cari koin yang harganya sedang REtrace ke area Golden Ratio.
+            content: `Anda adalah Ahli Analisa Forex & Crypto dengan Strategi Fibonacci.
+            Tugas: Analisa list koin/pair yang diberikan dan cari peluang pantulan (rebound).
             
-            LOGIKA STRATEGI:
-            1. Cari Swing High dan Swing Low terkuat dalam 50 candle terakhir.
-            2. Tarik Fibonacci Retracement.
-            3. Fokus cari Entry di area: 
-               - 0.618 (Golden Ratio) - Pantulan Kuat.
-               - 0.786 (Deep Retracement) - Support Terakhir sebelum ganti trend.
-            4. Konfirmasi: Harga harus berada di area Support Horizontal terkuat (S/R).
+            KRITERIA ENTRY:
+            - Cari Swing High & Swing Low terkuat dalam 50 candle terakhir.
+            - Fokus pada harga yang sedang RETRACE ke level:
+              a. 0.618 (Golden Ratio)
+              b. 0.786 (Deep Retracement/Support Terakhir)
+            - Tambahkan konfirmasi dari Support & Resistance horizontal terdekat.
             
             INSTRUKSI OUTPUT:
-            - Pilih TOP 7 koin yang paling dekat dengan area 0.618 atau 0.786.
-            - Jika tidak ada koin di area tersebut, balas: "NONE".
-            
-            FORMAT TELEGRAM:
-            🎯 **FIBONACCI BUY SIGNAL**
-            1. [SYMBOL] - [Type: 0.618 / 0.786 Entry]
-            💰 Current Price: [Price]
-            🚀 Buy Zone (S/R): [Range Area]
-            🎯 TP: [High Terakhir] | 🛑 SL: [Di bawah level 1.0 Fibonacci]
-            📝 Reason: [Jelaskan posisi harga terhadap garis Fibonaci & Support]`
+            - Berikan analisa hanya untuk pair yang MENDEKATI area Fibonacci tersebut.
+            - Jika tidak ada yang masuk area, balas HANYA dengan satu kata: "NONE".
+            - Jangan bertele-tele.`
           },
-          { role: "user", content: `Data Market: ${JSON.stringify(techData.data)}` }
+          { 
+            role: "user", 
+            content: `Analisa pair ini: ${JSON.stringify(techData.data)}. Market Sentiment: ${fgi.value}.` 
+          }
         ]
       })
     });
@@ -73,20 +77,29 @@ export async function GET(req: Request) {
     const aiData = await aiResponse.json();
     const recommendation = aiData.choices?.[0]?.message?.content || "NONE";
 
-    // 4. Kirim Telegram HANYA jika ada momentum Fibonacci
-    if (recommendation.trim().toUpperCase() !== "NONE") {
+    // 6. Logika Pengiriman Telegram
+    const isSignalFound = recommendation.trim().toUpperCase() !== "NONE";
+
+    if (isSignalFound) {
       await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chat_id: process.env.TELEGRAM_CHAT_ID,
-          text: recommendation,
+          text: `📊 **FOREX & CRYPTO SCANNER (FIBO)**\n\n${recommendation}`,
           parse_mode: "Markdown"
         })
       });
+      console.log("Sinyal ditemukan dan dikirim!");
+    } else {
+      console.log("Belum ada pair di area Fibonacci 0.618/0.786.");
     }
 
-    return NextResponse.json({ success: true, strategy: "Fibonacci Retracement" });
+    return NextResponse.json({ 
+      success: true, 
+      scanned_pairs: symbols.split(','), 
+      signal: isSignalFound 
+    });
 
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
