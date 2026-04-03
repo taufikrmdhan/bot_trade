@@ -28,7 +28,9 @@ export async function GET(req: Request) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         symbols: symbols.split(','),
-        intervals: ["1h"],
+        //ganti timeframe jadi 5 menit untuk mencari Swing High/Low yang valid, karena kalau 1 jam terlalu sedikit candle untuk mencari Swing High/Low yang valid
+        intervals: ["5m"],
+        // intervals: ["1h"],
         outputsize: 50, // Mengambil 50 candle untuk mencari Swing High/Low yang valid
         methods: ["quote"]
       })
@@ -93,15 +95,15 @@ export async function GET(req: Request) {
       console.log("Sinyal ditemukan dan dikirim!");
     } else {
       //jika tidak ada sinyal, munculkan pesan cuma analisa kondisi pasar dan pair yang discan (tidak console log tapi pesan di telegram)
-        await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: process.env.TELEGRAM_CHAT_ID,
-            text: `📊 **FOREX & CRYPTO SCANNER (FIBO)**\n\nTidak ada sinyal yang ditemukan.\n\nKondisi pasar saat ini:\n- Fear & Greed Index: ${fgi.value}\n- Pair yang di-scan: ${symbols.split(',').join(', ')}`,
-            parse_mode: "Markdown"
-          })
-        });
+        // await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        //   method: "POST",
+        //   headers: { "Content-Type": "application/json" },
+        //   body: JSON.stringify({
+        //     chat_id: process.env.TELEGRAM_CHAT_ID,
+        //     text: `📊 **FOREX & CRYPTO SCANNER (FIBO)**\n\nTidak ada sinyal yang ditemukan.\n\nKondisi pasar saat ini:\n- Fear & Greed Index: ${fgi.value}\n- Pair yang di-scan: ${symbols.split(',').join(', ')}`,
+        //     parse_mode: "Markdown"
+        //   })
+        // });
       console.log("Belum ada pair di area Fibonacci 0.618/0.786.");
     }
 
