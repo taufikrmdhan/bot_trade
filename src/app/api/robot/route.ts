@@ -46,7 +46,7 @@ export async function GET(req: Request) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-3.3-70b-instruct:free",
+        model: "google/gemini-2.0-flash-001",
         messages: [
           { 
             role: "system", 
@@ -83,6 +83,7 @@ export async function GET(req: Request) {
     });
 
     const aiData = await aiResponse.json();
+    console.log("AI Response:", aiData);
     const recommendation = aiData.choices?.[0]?.message?.content || "Gagal menganalisa.";
 
     // 3. Kirim ke Telegram
