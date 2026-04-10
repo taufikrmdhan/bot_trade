@@ -5,40 +5,53 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const key = searchParams.get('key');
-
-  if (key !== process.env.ROBOT_SECRET) {
+  if (searchParams.get('key') !== process.env.ROBOT_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    // 1. Ambil Data IHSG (Interval 1 Jam, Rentang 1 Bulan agar Swing Valid)
-    // Simbol ^JKSE = IHSG
-    const yahooRes = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/^JKSE?interval=1h&range=1mo`,
-      { next: { revalidate: 0 } }
-    );
-    const ihsgData = await yahooRes.json();
+    const topStocks = ['BBCA.JK', 'BBRI.JK', 'TLKM.JK', 'ASII.JK', 'UNVR.JK', 'ADRO.JK', 'ANTM.JK', 'GOTO.JK', 'AMRT.JK', 'BBNI.JK']; // Coba 10-15 dulu agar aman
 
-    const result = ihsgData.chart.result[0];
-    const quote = result.indicators.quote[0];
-    const currentPrice = result.meta.regularMarketPrice;
+    // 1. Fetch data secara PARALEL (Jauh lebih cepat)
+    const allData = await Promise.all(topStocks.map(async (symbol) => {
+      try {
+        const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1h&range=1mo`);
+        const json = await res.json();
+        const result = json.chart?.result?.[0];
+        if (!result) return null;
 
-    // Filter data null dan ambil 150 candle jam terakhir untuk analisa Swing
-    const closes = quote.close.filter((v: any) => v != null);
-    const highs = quote.high.filter((v: any) => v != null);
-    const lows = quote.low.filter((v: any) => v != null);
+        const closes = result.indicators.quote[0].close.filter((v: any) => v != null);
+        const highs = result.indicators.quote[0].high.filter((v: any) => v != null);
+        const lows = result.indicators.quote[0].low.filter((v: any) => v != null);
+        
+        const currentPrice = result.meta.regularMarketPrice;
+        const high = Math.max(...highs);
+        const low = Math.min(...lows);
 
-    const marketData = {
-      symbol: "IHSG (Composite Index)",
-      timeframe: "1 Hour (Swing Analysis)",
-      current_price: currentPrice,
-      highest_monthly: Math.max(...highs),
-      lowest_monthly: Math.min(...lows),
-      recent_100_hours: closes.slice(-100) 
-    };
+        // HITUNG FIBO SECARA MATEMATIS (Bukan AI)
+        // Retracement = High - (High - Low) * Ratio
+        const fibo618 = high - (high - low) * 0.618;
+        const fibo786 = high - (high - low) * 0.786;
 
-    // 2. AI Analysis: Strategi Swing Trading 2-5 Hari
+        // FILTER: Hanya ambil yang harganya dekat area 0.618 - 0.786 (Toleransi 1%)
+        const isNearBuyZone = currentPrice <= fibo618 * 1.01 && currentPrice >= fibo786 * 0.99;
+
+        if (!isNearBuyZone) return null;
+
+        return { symbol, currentPrice, fibo618, fibo786, high, low };
+      } catch { return null; }
+    }));
+
+    // Bersihkan data null
+    const candidates = allData.filter(d => d !== null);
+
+    if (candidates.length === 0) {
+      return NextResponse.json({ success: true, message: "Tidak ada saham di area Buy Zone Fibonacci" });
+    }
+
+    // 2. Kirim HANYA kandidat yang lolos ke AI (Maksimal 3-5 saham agar tidak timeout)
+    const finalCandidates = candidates.slice(0, 3);
+
     const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -48,35 +61,13 @@ export async function GET(req: Request) {
       body: JSON.stringify({
         model: "google/gemini-2.0-flash-001",
         messages: [
-          { 
-            role: "system", 
-            content: `Anda adalah Ahli Strategi Swing Trading Saham Indonesia.
-            Tugas: Analisa IHSG untuk potensi posisi HOLD selama 2-5 hari ke depan.
-            
-            LOGIKA FIBONACCI SWING:
-            1. Cari Swing High dan Swing Low utama dari data 1 bulan terakhir.
-            2. Fokus pada Golden Ratio 0.618 sebagai area entry terbaik untuk pantulan.
-            3. Abaikan fluktuasi kecil harian (noise).
-            
-            FORMAT ANALISA:
-            🇮🇩 **IHSG SWING ANALYSIS (2-5 DAYS)**
-            💰 Price: [Current Price]
-            
-            📊 **LEVELS:**
-            - Support (Fibo 0.618): [Price]
-            - Support Kuat (Fibo 0.786): [Price]
-            - Resistance Terdekat: [Price]
-            
-            🎯 **PREDIKSI 2-5 HARI:**
-            - Strategi: [Contoh: Wait & See / Buy on Weakness / Profit Taking]
-            - Target TP: [Target harga dalam 5 hari ke depan]
-            - Risk: [Batas bawah jika analisa meleset]
-            
-            📝 Catatan: [Analisa apakah IHSG sedang dalam trend naik atau butuh koreksi sehat].`
+          {
+            role: "system",
+            content: "Anda analis swing trading. Berikan instruksi Entry, SL (di bawah 0.786), dan TP (di area High 1 bulan) untuk saham yang diberikan."
           },
-          { 
-            role: "user", 
-            content: `Data Market IHSG: ${JSON.stringify(marketData)}` 
+          {
+            role: "user",
+            content: `Buat analisa swing 2-5 hari untuk saham ini: ${JSON.stringify(finalCandidates)}`
           }
         ]
       })
@@ -84,20 +75,23 @@ export async function GET(req: Request) {
 
     const aiData = await aiResponse.json();
     console.log("AI Response:", aiData);
-    const recommendation = aiData.choices?.[0]?.message?.content || "Gagal menganalisa.";
+    const recommendation = aiData.choices?.[0]?.message?.content;
+    console.log("Recommendation:", recommendation);
 
     // 3. Kirim ke Telegram
-    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: process.env.TELEGRAM_CHAT_ID,
-        text: recommendation,
-        parse_mode: "Markdown"
-      })
-    });
+    if (recommendation) {
+      await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: process.env.TELEGRAM_CHAT_ID,
+          text: `🎯 **SWING SIGNALS (GOLDEN RATIO)**\n\n${recommendation}`,
+          parse_mode: "Markdown"
+        })
+      });
+    }
 
-    return NextResponse.json({ success: true, mode: "Swing Analysis" });
+    return NextResponse.json({ success: true, signals_found: candidates.length });
 
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
