@@ -17,13 +17,9 @@ export async function GET(req: Request) {
       'BMTR.JK', 'ANTM.JK', 'UNTR.JK', 'INDF.JK', 'COAL.JK', 'KLBF.JK', 'HMSP.JK', 'ASRI.JK', 'AKRA.JK', 'MIRA.JK',
       'PLIN.JK', 'TREM.JK', 'ISAT.JK', 'EXCL.JK', 'AUTO.JK', 'MTDL.JK', 'MTEL.JK', 'DSSA.JK', 'SITU.JK', 'RODA.JK',
       'INAI.JK', 'INKP.JK', 'RAJA.JK', 'PJAA.JK', 'SCMA.JK', 'PRAS.JK', 'BNBR.JK', 'ELSA.JK', 'SILO.JK', 'PROY.JK',
-      'HGII.JK', 'INET.JK','ACES.JK', 'WBSA.JK', 'CDIA.JK', 'TPIA.JK'
+      'HGII.JK', 'INET.JK','ACES.JK', 'WBSA.JK', 'CDIA.JK', 'TPIA.JK', 'DEWA.JK'
     ];
-    // const topStocks = ['BBCA.JK', 'BBRI.JK', 'HGII.JK', 'ASII.JK', 'BRPT.JK', 'ADRO.JK', 'CDIA.JK', 'INET.JK', 'WBSA.JK', 'BBNI.JK'
-    //   ,'UNVR.JK', 'SMGR.JK', 'INCO.JK', 'RAJA.JK', 'GGRM.JK', 'TINS.JK', 'JPFA.JK', 'MEDC.JK', 'RECK.JK', 'ICBP.JK','TPIA','ITMG.JK', 'PGAS.JK', 'MNCN.JK', 'BBTN.JK', 'BMTR.JK', 'ANTM.JK', 'UNTR.JK', 'INDF.JK', 'COAL.JK', 'KLBF.JK'
-    // ];
 
-    // 1. Fetch data secara PARALEL (Jauh lebih cepat)
     const allData = await Promise.all(topStocks.map(async (symbol) => {
       try {
         const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1h&range=1mo`);
@@ -31,7 +27,7 @@ export async function GET(req: Request) {
         const result = json.chart?.result?.[0];
         if (!result) return null;
 
-        const closes = result.indicators.quote[0].close.filter((v: any) => v != null);
+        // const closes = result.indicators.quote[0].close.filter((v: any) => v != null);
         const highs = result.indicators.quote[0].high.filter((v: any) => v != null);
         const lows = result.indicators.quote[0].low.filter((v: any) => v != null);
         
