@@ -176,6 +176,9 @@ export async function GET(req: Request) {
       "DEWA.JK",
       "BRENT.JK",
       "BUMI.JK",
+      "BRMS.JK",
+      "BIPI.JK",
+      "PANI.JK",
     ];
 
     // 1. Ambil Data Harga & Berita secara Paralel
